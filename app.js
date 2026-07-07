@@ -192,6 +192,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadMonthData(globalMonthSelect.value);
     setupEventListeners();
     startLiveClock();
+
+    // Auto-open biometric scanner on startup if employees exist
+    if (employees.length > 0) {
+        setTimeout(() => {
+            openBiometricScannerModal();
+        }, 800);
+    }
 });
 
 // Theme Management

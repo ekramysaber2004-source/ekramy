@@ -1,79 +1,91 @@
-const CACHE_NAME = 'basma-cache-v2.2';
+const CACHE_NAME = 'basma-cache-v2.4';
 const ASSETS_TO_CACHE = [
-  'index.html',
-  'app.css',
-  'app.js',
-  'icon.svg',
-  'manifest.json'
+  '/',
+  '/index.html',
+  '/app.css',
+  '/app.js',
+  '/icon.svg',
+  '/manifest.json'
 ];
 
-// Install Event - Caching basic local files
+// Install Event - Cache all assets
 self.addEventListener('install', event => {
+  // Force immediate activation (skip waiting)
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('[Service Worker] Caching app shell assets');
+        console.log('[SW] Caching app shell assets v2.4');
         return cache.addAll(ASSETS_TO_CACHE);
       })
-      .then(() => self.skipWaiting())
+      .catch(err => console.warn('[SW] Cache addAll failed (some assets may not be cached):', err))
   );
 });
 
-// Activate Event - Cleaning old caches
+// Activate Event - Clean up old caches immediately
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
-        cacheNames.map(cache => {
-          if (cache !== CACHE_NAME) {
-            console.log('[Service Worker] Clearing old cache:', cache);
-            return caches.delete(cache);
-          }
-        })
+        cacheNames
+          .filter(name => name !== CACHE_NAME)
+          .map(name => {
+            console.log('[SW] Deleting old cache:', name);
+            return caches.delete(name);
+          })
       );
-    }).then(() => self.clients.claim())
+    }).then(() => {
+      console.log('[SW] Activated v2.4, claiming all clients');
+      return self.clients.claim();
+    })
   );
 });
 
-// Fetch Event - Serve cached assets when offline
+// Fetch Event - Network first, fallback to cache
 self.addEventListener('fetch', event => {
-  // Only handle GET requests and skip Supabase/API calls
-  if (event.request.method !== 'GET' || event.request.url.includes('supabase.co')) {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') return;
+
+  // Skip Supabase API calls (always go to network)
+  if (event.request.url.includes('supabase.co') ||
+      event.request.url.includes('supabase.io') ||
+      event.request.url.includes('googleapis.com') ||
+      event.request.url.includes('gstatic.com') ||
+      event.request.url.includes('cdnjs.cloudflare.com') ||
+      event.request.url.includes('cdn.jsdelivr.net')) {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request)
-      .then(cachedResponse => {
-        if (cachedResponse) {
-          // Fetch dynamic updates in the background (Stale-While-Revalidate)
-          fetch(event.request).then(networkResponse => {
-            if (networkResponse && networkResponse.status === 200) {
-              caches.open(CACHE_NAME).then(cache => cache.put(event.request, networkResponse));
-            }
-          }).catch(() => {/* Ignore network update errors when offline */});
-          
-          return cachedResponse;
-        }
+  // For navigation requests (opening the app), use network first
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          // Cache a fresh copy
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => {
+          // Offline: serve cached index.html
+          return caches.match('/') || caches.match('/index.html');
+        })
+    );
+    return;
+  }
 
-        // Fallback to network
-        return fetch(event.request).then(networkResponse => {
-          // Cache newly requested assets on the fly if they are static resources
-          if (networkResponse && networkResponse.status === 200 && (
-              event.request.url.includes('fonts.googleapis.com') ||
-              event.request.url.includes('fonts.gstatic.com') ||
-              event.request.url.includes('cdnjs.cloudflare.com')
-          )) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseClone));
-          }
-          return networkResponse;
-        });
-      }).catch(() => {
-        // Offline fallback for html pages
-        if (event.request.headers.get('accept') && event.request.headers.get('accept').includes('text/html')) {
-          return caches.match('index.html');
+  // For other static assets: stale-while-revalidate
+  event.respondWith(
+    caches.match(event.request).then(cached => {
+      const networkFetch = fetch(event.request).then(networkResponse => {
+        if (networkResponse && networkResponse.status === 200) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         }
-      })
+        return networkResponse;
+      }).catch(() => cached);
+
+      return cached || networkFetch;
+    })
   );
 });
