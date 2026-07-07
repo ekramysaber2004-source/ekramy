@@ -444,21 +444,23 @@ async function loadEmployees() {
     const savedEmployees = localStorage.getItem("hr_employees");
     if (savedEmployees) {
         employees = JSON.parse(savedEmployees);
+        // Clean default fallback if it's the only one
+        if (employees.length === 1 && employees[0].id === "1" && employees[0].name === "عمر الخطيب") {
+            employees = [];
+            localStorage.setItem("hr_employees", JSON.stringify(employees));
+            localStorage.removeItem("hr_active_employee_id");
+            // Clear any attendance data cache for employee 1
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith("attendance_data_1_")) {
+                    localStorage.removeItem(key);
+                    i--;
+                }
+            }
+        }
     } else {
-        // Create default employee
-        employees = [{
-            id: "1",
-            name: "عمر الخطيب",
-            role: "محاسب عام",
-            basicSalary: 10000,
-            workDays: 22,
-            dailyHours: 8,
-            startTime: "11:00",
-            gracePeriod: 15,
-            overtimeMultiplier: 1.5,
-            delayMultiplier: 2.0,
-            fingerprintRegistered: false
-        }];
+        // Start empty by default
+        employees = [];
         localStorage.setItem("hr_employees", JSON.stringify(employees));
     }
     
@@ -537,6 +539,13 @@ async function syncAllLocalEmployeesToCloud() {
 
 function populateEmployeeDropdown() {
     globalEmployeeSelect.innerHTML = "";
+    if (employees.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "لا يوجد موظفين مضافين";
+        globalEmployeeSelect.appendChild(option);
+        return;
+    }
     employees.forEach(emp => {
         const option = document.createElement("option");
         option.value = emp.id;
@@ -549,7 +558,21 @@ function populateEmployeeDropdown() {
 }
 
 function populateActiveEmployeeSettings(emp) {
-    if (!emp) return;
+    if (!emp) {
+        document.getElementById("display-employee-name").textContent = "لا يوجد موظف نشط";
+        document.getElementById("display-employee-role").textContent = "يرجى إضافة موظف أولاً";
+        
+        if (setEmpName) setEmpName.value = "";
+        if (setEmpRole) setEmpRole.value = "";
+        if (setSalary) setSalary.value = "";
+        if (setWorkdays) setWorkdays.value = "";
+        if (setDailyhours) setDailyhours.value = "";
+        if (setStartTime) setStartTime.value = "";
+        if (setGracePeriod) setGracePeriod.value = "";
+        if (setOvertimeMult) setOvertimeMult.value = "";
+        if (setDelayMult) setDelayMult.value = "";
+        return;
+    }
     
     // Update sidebar bottom info
     document.getElementById("display-employee-name").textContent = emp.name;
@@ -1159,23 +1182,6 @@ function generateDefaultMonthData(monthStr, force = false) {
         if (dayOfWeekIndex === 5 || dayOfWeekIndex === 6) {
             status = "weekend";
         }
-        
-        // Prepopulate data for default employee (ID 1) in July 2026 to match spreadsheet
-        if (activeEmployeeId === "1" && monthStr === "2026-07" && !force) {
-            if (day === 1) {
-                status = "present";
-                checkin = "11:11:00";
-                checkout = "19:09:00";
-            } else if (day === 2) {
-                status = "present";
-                checkin = "11:00:00";
-                checkout = "19:00:00";
-            } else if (day === 5) {
-                status = "present";
-                checkin = "11:18:00";
-                checkout = "";
-            }
-        }
 
         generatedData.push({
             date: dateString,
@@ -1249,7 +1255,53 @@ function formatTime12Hour(time24Str) {
 // Calculations and UI Rendering
 function calculateAndPopulate() {
     const activeEmp = employees.find(e => e.id === activeEmployeeId);
-    if (!activeEmp) return;
+    if (!activeEmp) {
+        // Clear Dashboard Cards
+        if (dashBasicSalary) dashBasicSalary.textContent = "0.00";
+        if (dashOvertimeAmount) dashOvertimeAmount.textContent = "0.00";
+        if (dashOvertimeHours) dashOvertimeHours.textContent = "0";
+        if (dashDeductionAmount) dashDeductionAmount.textContent = "0.00";
+        if (dashDelayHours) dashDelayHours.textContent = "0";
+        if (dashNetSalary) dashNetSalary.textContent = "0.00";
+        if (dashNetAdjustments) {
+            dashNetAdjustments.textContent = "0.00";
+            dashNetAdjustments.className = "";
+        }
+        
+        // Clear stats list
+        if (statWorkDays) statWorkDays.textContent = "0 / 0";
+        if (statWeekendDays) statWeekendDays.textContent = "0";
+        if (statLeavesDays) statLeavesDays.textContent = "0";
+        if (statAbsentDays) statAbsentDays.textContent = "0";
+        if (statAvgCheckin) statAvgCheckin.textContent = "--:--";
+        
+        // Clear Table
+        if (attendanceTableBody) attendanceTableBody.innerHTML = `
+            <tr>
+                <td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                    <i class="fa-solid fa-calendar-xmark" style="font-size: 2rem; margin-bottom: 0.5rem; display: block;"></i>
+                    لا يوجد موظف نشط لعرض سجلات حضوره. يرجى إضافة موظف أولاً وتفعيله.
+                </td>
+            </tr>
+        `;
+        
+        // Clear slip (Reports Section)
+        if (slipMonthName) slipMonthName.textContent = "---";
+        if (slipEmpName) slipEmpName.textContent = "---";
+        if (slipEmpId) slipEmpId.textContent = "---";
+        if (slipEmpRole) slipEmpRole.textContent = "---";
+        if (slipBasicVal) slipBasicVal.textContent = "0.00";
+        if (slipOvertimeHrs) slipOvertimeHrs.textContent = "0";
+        if (slipOvertimeVal) slipOvertimeVal.textContent = "0.00";
+        if (slipDelayHrs) slipDelayHrs.textContent = "0";
+        if (slipDelayVal) slipDelayVal.textContent = "0.00";
+        if (slipAbsentDaysCount) slipAbsentDaysCount.textContent = "0";
+        if (slipAbsentVal) slipAbsentVal.textContent = "0.00";
+        if (slipTotalAdd) slipTotalAdd.textContent = "0.00";
+        if (slipTotalDed) slipTotalDed.textContent = "0.00";
+        if (slipNetVal) slipNetVal.textContent = "---";
+        return;
+    }
 
     // 1. Calculate Standard Values based on Active Employee
     const basicSalary = activeEmp.basicSalary;
@@ -1612,6 +1664,18 @@ function saveModalRecord() {
 // Render Employees list on Manage Employees Page
 function renderEmployeesList() {
     employeesCardsContainer.innerHTML = "";
+    
+    if (employees.length === 0) {
+        employeesCardsContainer.innerHTML = `
+            <div class="no-data-placeholder" style="grid-column: 1 / -1; text-align: center; padding: 3rem; background: var(--bg-card); border-radius: 12px; border: 1px dashed var(--border-color); margin: 1rem 0;">
+                <i class="fa-solid fa-users" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem; display: block;"></i>
+                <h3 style="margin-bottom: 0.5rem; color: var(--text-main);">لا يوجد موظفين مضافين حالياً</h3>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">ابدأ بإضافة موظف جديد لتسجيل الحضور والرواتب</p>
+                <button class="btn btn-primary" onclick="openEmployeeModal()"><i class="fa-solid fa-plus"></i> إضافة موظف جديد</button>
+            </div>
+        `;
+        return;
+    }
     
     employees.forEach(emp => {
         const card = document.createElement("div");
