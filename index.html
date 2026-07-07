@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام بصمة الاحترافي - الحضور والرواتب</title>
+    <!-- Google Fonts: Tajawal -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js for Dashboard Visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Supabase Client Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Menu (RTL - Right Side) -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <i class="fa-solid fa-fingerprint logo-icon"></i>
+                    <h2>نظام بصمة</h2>
+                </div>
+                <div class="sidebar-header-row">
+                    <span class="version">الإصدار الاحترافي 2.0</span>
+                    <button class="close-sidebar-btn" id="mobile-sidebar-close" title="إغلاق القائمة">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Live Digital Clock -->
+            <div class="live-clock-widget">
+                <div class="clock-time" id="live-clock">00:00:00</div>
+                <div class="clock-date" id="live-date">الأحد، 1 يناير 2026</div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-target="dashboard">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>لوحة التحكم</span>
+                </button>
+                <button class="nav-btn" data-target="attendance">
+                    <i class="fa-solid fa-calendar-check"></i>
+                    <span>سجل الحضور والانصراف</span>
+                </button>
+                <button class="nav-btn" data-target="employees">
+                    <i class="fa-solid fa-users"></i>
+                    <span>إدارة الموظفين</span>
+                </button>
+                <button class="nav-btn" data-target="reports">
+                    <i class="fa-solid fa-file-invoice-dollar"></i>
+                    <span>مسيرات الرواتب والتقارير</span>
+                </button>
+                <button class="nav-btn" data-target="settings">
+                    <i class="fa-solid fa-gears"></i>
+                    <span>إعدادات النظام والنسخ</span>
+                </button>
+                <button class="nav-btn biometric-nav-btn" id="btn-biometric-scan">
+                    <i class="fa-solid fa-fingerprint"></i>
+                    <span>بصمة الموظف 📲</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <!-- Today Quick Stamp Buttons -->
+                <div class="quick-stamp-widget">
+                    <p class="quick-stamp-title"><i class="fa-solid fa-bolt"></i> تسجيل سريع لليوم</p>
+                    <div class="quick-stamp-status" id="today-status-sidebar">لا توجد بيانات لليوم</div>
+                    <div class="quick-stamp-btns">
+                        <button class="btn-stamp checkin" id="btn-quick-checkin" onclick="quickStamp('checkin')">
+                            <i class="fa-solid fa-arrow-right-to-bracket"></i> حضور الآن
+                        </button>
+                        <button class="btn-stamp checkout" id="btn-quick-checkout" onclick="quickStamp('checkout')">
+                            <i class="fa-solid fa-arrow-right-from-bracket"></i> انصراف الآن
+                        </button>
+                    </div>
+                </div>
+                <div class="employee-quick-info">
+                    <i class="fa-solid fa-user-tie"></i>
+                    <div>
+                        <div class="emp-name" id="display-employee-name">جاري التحميل...</div>
+                        <div class="emp-role" id="display-employee-role">موظف نشط</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="app-header">
+                <div class="header-title-wrapper">
+                    <button class="menu-toggle-btn" id="mobile-menu-toggle" title="عرض القائمة">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <div class="header-title">
+                        <h1 id="page-title">لوحة التحكم</h1>
+                        <p class="subtitle" id="page-subtitle">نظرة عامة على حالة الحضور والرواتب لهذا الشهر</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <div class="employee-selector-wrapper">
+                        <label for="global-employee-select"><i class="fa-solid fa-user"></i> الموظف الحالي:</label>
+                        <select id="global-employee-select">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+                    <div class="month-selector-wrapper">
+                        <label for="global-month-select"><i class="fa-solid fa-calendar"></i> الشهر:</label>
+                        <input type="month" id="global-month-select" value="">
+                    </div>
+                    <button class="theme-toggle-btn" id="theme-toggle" title="تبديل المظهر">
+                        <i class="fa-solid fa-moon"></i>
+                    </button>
+                    <button class="install-btn" id="btn-pwa-install" style="display: none;" title="تثبيت البرنامج على جهازك">
+                        <i class="fa-solid fa-cloud-arrow-down"></i> تثبيت التطبيق
+                    </button>
+                </div>
+            </header>
+
+            <!-- Today Smart Alert Banner -->
+            <div class="today-banner" id="today-banner" style="display:none;">
+                <div class="banner-content">
+                    <div class="banner-icon" id="banner-icon"><i class="fa-solid fa-circle-info"></i></div>
+                    <div class="banner-text">
+                        <strong id="banner-title">اليوم</strong>
+                        <span id="banner-desc">جاري التحميل...</span>
+                    </div>
+                </div>
+                <button class="banner-close" onclick="document.getElementById('today-banner').style.display='none'">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Dashboard Page -->
+            <section id="dashboard-page" class="page-section active">
+                <!-- Summary Cards Grid -->
+                <div class="summary-cards-grid">
+                    <div class="card basic-salary-card">
+                        <div class="card-icon"><i class="fa-solid fa-money-bill-wave"></i></div>
+                        <div class="card-details">
+                            <h3>الراتب الأساسي</h3>
+                            <span class="card-value" id="dash-basic-salary">0.00</span>
+                            <span class="card-unit">جنية</span>
+                        </div>
+                    </div>
+
+                    <div class="card overtime-card">
+                        <div class="card-icon"><i class="fa-solid fa-circle-plus"></i></div>
+                        <div class="card-details">
+                            <h3>الإضافي</h3>
+                            <span class="card-value text-success" id="dash-overtime-amount">0.00</span>
+                            <span class="card-unit">جنية</span>
+                            <div class="card-sub-info">
+                                <span id="dash-overtime-hours">0</span> ساعة إضافية
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card deduction-card">
+                        <div class="card-icon"><i class="fa-solid fa-circle-minus"></i></div>
+                        <div class="card-details">
+                            <h3>الخصومات والتأخير</h3>
+                            <span class="card-value text-danger" id="dash-deduction-amount">0.00</span>
+                            <span class="card-unit">جنية</span>
+                            <div class="card-sub-info">
+                                <span id="dash-delay-hours">0</span> ساعة تأخير
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card net-salary-card">
+                        <div class="card-icon"><i class="fa-solid fa-wallet"></i></div>
+                        <div class="card-details">
+                            <h3>صافي الراتب</h3>
+                            <span class="card-value text-primary" id="dash-net-salary">0.00</span>
+                            <span class="card-unit">جنية</span>
+                            <div class="card-sub-info">
+                                صافي التعديل: <span id="dash-net-adjustments">0.00</span> جنية
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts & Quick Insights -->
+                <div class="dashboard-grid">
+                    <div class="dashboard-chart-card">
+                        <h3>توزيع ساعات العمل طوال الشهر</h3>
+                        <div class="chart-container">
+                            <canvas id="hoursChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-info-card">
+                        <h3>إحصائيات الشهر الحالية</h3>
+                        <ul class="stats-list">
+                            <li>
+                                <span class="stat-label"><i class="fa-solid fa-calendar-days"></i> أيام العمل الفعلية:</span>
+                                <span class="stat-val" id="stat-work-days">0 / 0</span>
+                            </li>
+                            <li>
+                                <span class="stat-label"><i class="fa-solid fa-user-clock"></i> متوسط الحضور اليومي:</span>
+                                <span class="stat-val" id="stat-avg-checkin">--:--</span>
+                            </li>
+                            <li>
+                                <span class="stat-label"><i class="fa-solid fa-mug-hot"></i> أيام الإجازات الأسبوعية:</span>
+                                <span class="stat-val" id="stat-weekend-days">0</span>
+                            </li>
+                            <li>
+                                <span class="stat-label"><i class="fa-solid fa-briefcase"></i> أيام الإجازات المرضية/الرسمية:</span>
+                                <span class="stat-val" id="stat-leaves-days">0</span>
+                            </li>
+                            <li>
+                                <span class="stat-label"><i class="fa-solid fa-user-slash"></i> أيام الغياب الكامل:</span>
+                                <span class="stat-val text-danger" id="stat-absent-days">0</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Attendance Log Page -->
+            <section id="attendance-page" class="page-section">
+                <div class="table-actions-header">
+                    <div class="search-filter-wrapper">
+                        <div class="input-group">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="attendance-search" placeholder="ابحث بالتاريخ أو اليوم...">
+                        </div>
+                        <select id="filter-status">
+                            <option value="all">كل الحالات</option>
+                            <option value="present">حاضر</option>
+                            <option value="weekend">إجازة أسبوعية</option>
+                            <option value="leave">إجازات أخرى</option>
+                            <option value="absent">غياب</option>
+                            <option value="delay">تأخير</option>
+                        </select>
+                    </div>
+                    <div class="action-buttons">
+                        <button class="btn btn-secondary" id="btn-reset-attendance">
+                            <i class="fa-solid fa-rotate-left"></i> إعادة تهيئة الشهر
+                        </button>
+                        <button class="btn btn-success" id="btn-quick-checkin-table" onclick="quickStamp('checkin')">
+                            <i class="fa-solid fa-arrow-right-to-bracket"></i> تسجيل حضور الآن
+                        </button>
+                        <button class="btn btn-danger-solid" id="btn-quick-checkout-table" onclick="quickStamp('checkout')">
+                            <i class="fa-solid fa-arrow-right-from-bracket"></i> تسجيل انصراف الآن
+                        </button>
+                        <button class="btn btn-primary" id="btn-add-record">
+                            <i class="fa-solid fa-plus"></i> يدوي
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Attendance Table Container -->
+                <div class="table-container">
+                    <table class="attendance-table" id="attendance-table-element">
+                        <thead>
+                            <tr>
+                                <th>التاريخ</th>
+                                <th>اليوم</th>
+                                <th>حضور</th>
+                                <th>انصراف</th>
+                                <th>ساعات العمل</th>
+                                <th>إضافي (دقيقة)</th>
+                                <th>تأخير (دقيقة)</th>
+                                <th>الحالة</th>
+                                <th>خيارات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="attendance-table-body">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Manage Employees Page -->
+            <section id="employees-page" class="page-section">
+                <div class="table-actions-header">
+                    <div class="search-filter-wrapper">
+                        <h3><i class="fa-solid fa-users-viewfinder" style="color:var(--primary);"></i> قائمة الموظفين في النظام</h3>
+                    </div>
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" id="btn-add-employee">
+                            <i class="fa-solid fa-user-plus"></i> إضافة موظف جديد
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="employees-grid" id="employees-cards-container">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </section>
+
+            <!-- Reports & Print Page -->
+            <section id="reports-page" class="page-section">
+                <div class="report-controls">
+                    <h3><i class="fa-solid fa-sliders" style="color:var(--primary);"></i> خيارات استخراج التقارير والرواتب</h3>
+                    <div class="report-btn-group">
+                        <button class="btn btn-outline" id="btn-print-slip">
+                            <i class="fa-solid fa-print"></i> طباعة كشف الراتب
+                        </button>
+                        <button class="btn btn-outline" id="btn-export-excel">
+                            <i class="fa-solid fa-file-excel"></i> تصدير إلى Excel
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Salary Slip Sheet -->
+                <div class="salary-slip-container" id="salary-slip">
+                    <div class="slip-header">
+                        <div class="company-logo">
+                            <i class="fa-solid fa-fingerprint"></i>
+                            <div>
+                                <h2>مؤسسة البصمة الذكية</h2>
+                                <p>إدارة الموارد البشرية والرواتب</p>
+                            </div>
+                        </div>
+                        <div class="slip-title">
+                            <h3>كشف تفصيلي بمسير راتب الموظف</h3>
+                            <p>عن شهر: <span id="slip-month-name">يوليو 2026</span></p>
+                        </div>
+                    </div>
+
+                    <div class="slip-info-grid">
+                        <div class="info-item">
+                            <span class="info-label">اسم الموظف:</span>
+                            <span class="info-value" id="slip-emp-name">جاري التحميل...</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">رقم الموظف:</span>
+                            <span class="info-value" id="slip-emp-id">EMP-2026-000</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">المسمى الوظيفي:</span>
+                            <span class="info-value" id="slip-emp-role">دوام كامل</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">تاريخ الإصدار:</span>
+                            <span class="info-value" id="slip-issue-date">--/--/----</span>
+                        </div>
+                    </div>
+
+                    <div class="slip-calculation-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>البند</th>
+                                    <th>ساعات العمل / التعديل</th>
+                                    <th>القيمة لكل ساعة / يوم</th>
+                                    <th>المستحقات (+)</th>
+                                    <th>الاستقطاعات (-)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong>الراتب الأساسي</strong></td>
+                                    <td id="slip-total-days-label">22 يوم عمل</td>
+                                    <td id="slip-daily-rate">0.00 جنية / يوم</td>
+                                    <td id="slip-basic-val" class="bold">0.00 جنية</td>
+                                    <td>-</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>الساعات الإضافية (1.5x)</strong></td>
+                                    <td id="slip-overtime-hrs">0.00 ساعة</td>
+                                    <td id="slip-overtime-rate">0.00 جنية / ساعة</td>
+                                    <td id="slip-overtime-val" class="text-success">0.00 جنية</td>
+                                    <td>-</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>ساعات التأخير (2x)</strong></td>
+                                    <td id="slip-delay-hrs">0.00 ساعة</td>
+                                    <td id="slip-delay-rate">0.00 جنية / ساعة</td>
+                                    <td>-</td>
+                                    <td id="slip-delay-val" class="text-danger">0.00 جنية</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>أيام الغياب الكامل (بدون إذن)</strong></td>
+                                    <td id="slip-absent-days-count">0 يوم</td>
+                                    <td id="slip-absent-rate">0.00 جنية / يوم</td>
+                                    <td>-</td>
+                                    <td id="slip-absent-val" class="text-danger">0.00 جنية</td>
+                                </tr>
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="3" class="text-left"><strong>المجموع الكلي</strong></td>
+                                    <td id="slip-total-add" class="text-success bold">0.00 جنية</td>
+                                    <td id="slip-total-ded" class="text-danger bold">0.00 جنية</td>
+                                </tr>
+                                <tr class="net-row">
+                                    <td colspan="3" class="text-left"><strong>صافي الراتب المستحق للموظف</strong></td>
+                                    <td colspan="2" id="slip-net-val" class="bold text-primary text-center">0.00 جنية</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+
+                    <div class="slip-footer">
+                        <div class="signature-block">
+                            <p>توقيع الموظف</p>
+                            <div class="signature-line"></div>
+                        </div>
+                        <div class="signature-block">
+                            <p>اعتماد الموارد البشرية</p>
+                            <div class="signature-line"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings Page -->
+            <section id="settings-page" class="page-section">
+                <div class="settings-grid">
+                    <!-- General Active Employee Info -->
+                    <div class="settings-card">
+                        <h3><i class="fa-solid fa-user-tie" style="color:var(--primary);"></i> بيانات الموظف النشط حالياً</h3>
+                        <div class="form-group">
+                            <label for="settings-emp-name">اسم الموظف:</label>
+                            <input type="text" id="settings-emp-name" value="">
+                        </div>
+                        <div class="form-group">
+                            <label for="settings-emp-role">المسمى الوظيفي:</label>
+                            <input type="text" id="settings-emp-role" value="">
+                        </div>
+                    </div>
+
+                    <!-- Salary Settings -->
+                    <div class="settings-card">
+                        <h3><i class="fa-solid fa-clock-rotate-left" style="color:var(--primary);"></i> إعدادات الراتب والدوام للموظف النشط</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-salary">الراتب الأساسي (جنية):</label>
+                                <input type="number" id="settings-salary" value="10000" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-workdays">أيام العمل في الشهر (للحساب):</label>
+                                <input type="number" id="settings-workdays" value="22" min="1" max="31">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-dailyhours">ساعات العمل في اليوم:</label>
+                                <input type="number" id="settings-dailyhours" value="8" min="1" max="24">
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-start-time">وقت الحضور الرسمي:</label>
+                                <input type="time" id="settings-start-time" value="11:00">
+                            </div>
+                        </div>
+                        <div class="form-row" style="margin-top: 1rem;">
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label for="settings-grace-period">فترة السماح للتأخير بدون خصم (بالدقائق):</label>
+                                <input type="number" id="settings-grace-period" value="15" min="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Rate Multipliers -->
+                    <div class="settings-card">
+                        <h3><i class="fa-solid fa-percentage" style="color:var(--primary);"></i> مضاعفات الاحتساب (المعاملات)</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-overtime-mult">معامل الإضافي (ضرب أجر الساعة):</label>
+                                <input type="number" id="settings-overtime-mult" value="1.5" step="0.1" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-delay-mult">معامل التأخير (ضرب أجر الساعة):</label>
+                                <input type="number" id="settings-delay-mult" value="2.0" step="0.1" min="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Backup & Database Management -->
+                    <div class="settings-card" style="grid-column: span 2;">
+                        <h3><i class="fa-solid fa-database" style="color:var(--primary);"></i> إدارة البيانات والنسخ الاحتياطي</h3>
+                        <p class="subtitle" style="margin-bottom: 1rem;">يمكنك حفظ نسخة احتياطية من كافة سجلات الموظفين والحضور في ملف خارجي، أو استعادتها في أي وقت لحمايتها من الضياع.</p>
+                        <div class="form-row">
+                            <button class="btn btn-outline" id="btn-export-backup" style="justify-content: center; width: 100%;">
+                                <i class="fa-solid fa-download"></i> تصدير قاعدة البيانات بالكامل (.json)
+                            </button>
+                            <div class="file-upload-wrapper" style="width: 100%;">
+                                <input type="file" id="import-backup-file" accept=".json" style="display: none;">
+                                <button class="btn btn-secondary" id="btn-trigger-import" style="width: 100%; justify-content: center;">
+                                    <i class="fa-solid fa-upload"></i> استيراد قاعدة البيانات من ملف
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Supabase Integration -->
+                    <div class="settings-card" style="grid-column: span 2;">
+                        <h3><i class="fa-solid fa-cloud-arrow-up" style="color:var(--primary);"></i> قاعدة البيانات السحابية (Supabase) ☁️</h3>
+                        <p class="subtitle" style="margin-bottom: 1rem;">اربط تطبيقك بقاعدة بيانات سحابية لمزامنة سجلات الموظفين والحضور عبر السحابة والوصول إليها من أي جهاز.</p>
+                        
+                        <div class="supabase-status-indicator" id="supabase-status">
+                            <span class="status-dot status-offline"></span>
+                            <span class="status-text">الوضع المحلي (أوفلاين) - لم يتم الاتصال بقاعدة بيانات سحابية</span>
+                        </div>
+
+                        <div class="form-row" style="margin-top: 1rem;">
+                            <div class="form-group">
+                                <label for="settings-supabase-url">رابط مشروع سوبابيز (Supabase URL):</label>
+                                <input type="url" id="settings-supabase-url" placeholder="https://your-project.supabase.co">
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-supabase-key">مفتاح الوصول العام (Anon Key):</label>
+                                <input type="password" id="settings-supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+                            </div>
+                        </div>
+
+                        <div class="supabase-setup-instructions" style="margin-top: 1rem; background: rgba(0,0,0,0.02); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <h4 style="font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-circle-info" style="color:var(--primary);"></i> كيفية الإعداد:</h4>
+                            <ol style="padding-right: 1.2rem; font-size: 0.8rem; line-height: 1.5; color: var(--text-muted);">
+                                <li>أنشئ مشروعاً مجانياً على موقع <a href="https://supabase.com" target="_blank">supabase.com</a></li>
+                                <li>افتح الـ <strong>SQL Editor</strong> في لوحة تحكم سوبابيز الخاصة بك.</li>
+                                <li>انسخ كود تهيئة الجداول من مستند <a href="README.md" target="_blank">README.md</a> والمنشور بخطة العمل والصقه هناك لتنفيذ الاستعلام.</li>
+                                <li>انسخ الـ <strong>Project URL</strong> والـ <strong>Anon API Key</strong> من إعدادات سوبابيز (API Settings) والصقهما في الأعلى.</li>
+                                <li>اضغط على زر حفظ الإعدادات بالأسفل لتفعيل المزامنة الفورية.</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-actions">
+                    <button class="btn btn-primary" id="btn-save-settings">
+                        <i class="fa-solid fa-floppy-disk"></i> حفظ الإعدادات وتحديث البيانات
+                    </button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Edit Attendance Modal -->
+    <div class="modal" id="edit-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">تعديل سجل اليوم</h3>
+                <button class="close-modal-btn" id="close-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="modal-date">
+                <div class="form-group">
+                    <label>تاريخ اليوم:</label>
+                    <span id="modal-date-display" class="bold"></span>
+                </div>
+                <div class="form-group">
+                    <label for="modal-status">حالة اليوم:</label>
+                    <select id="modal-status">
+                        <option value="present">عمل فعلي</option>
+                        <option value="weekend">إجازة أسبوعية</option>
+                        <option value="leave">إجازة رسمية / مرضية / إذن</option>
+                        <option value="absent">غياب غير مبرر</option>
+                    </select>
+                </div>
+                <div class="form-row" id="time-inputs-container">
+                    <div class="form-group">
+                        <label for="modal-checkin">وقت الحضور:</label>
+                        <input type="time" id="modal-checkin" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="modal-checkout">وقت الانصراف:</label>
+                        <input type="time" id="modal-checkout" step="1">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-modal-cancel">إلغاء</button>
+                <button class="btn btn-primary" id="btn-modal-save">حفظ التغييرات</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Employee Modal -->
+    <div class="modal" id="employee-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="emp-modal-title">إضافة موظف جديد</h3>
+                <button class="close-modal-btn" id="close-emp-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="emp-modal-id">
+                <div class="form-group">
+                    <label for="emp-modal-name">اسم الموظف:</label>
+                    <input type="text" id="emp-modal-name" required placeholder="مثال: عمر الخطيب">
+                </div>
+                <div class="form-group">
+                    <label for="emp-modal-role">المسمى الوظيفي:</label>
+                    <input type="text" id="emp-modal-role" required placeholder="مثال: محاسب عام">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="emp-modal-salary">الراتب الأساسي (جنية):</label>
+                        <input type="number" id="emp-modal-salary" value="10000" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="emp-modal-workdays">أيام العمل في الشهر:</label>
+                        <input type="number" id="emp-modal-workdays" value="22" min="1" max="31">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="emp-modal-dailyhours">ساعات العمل في اليوم:</label>
+                        <input type="number" id="emp-modal-dailyhours" value="8" min="1" max="24">
+                    </div>
+                    <div class="form-group">
+                        <label for="emp-modal-starttime">وقت الحضور الرسمي:</label>
+                        <input type="time" id="emp-modal-starttime" value="11:00">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label for="emp-modal-grace">فترة السماح للتأخير (بالدقائق):</label>
+                        <input type="number" id="emp-modal-grace" value="15" min="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="emp-modal-overtime-mult">معامل الإضافي:</label>
+                        <input type="number" id="emp-modal-overtime-mult" value="1.5" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="emp-modal-delay-mult">معامل التأخير:</label>
+                        <input type="number" id="emp-modal-delay-mult" value="2.0" step="0.1">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-emp-modal-cancel">إلغاء</button>
+                <button class="btn btn-primary" id="btn-emp-modal-save">حفظ الموظف</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Biometric Fingerprint Scanner Modal -->
+    <div class="modal" id="fingerprint-modal">
+        <div class="modal-content" style="max-width: 420px; text-align: center;">
+            <div class="modal-header">
+                <h3>جهاز بصمة الموظفين البيومتري</h3>
+                <button class="close-modal-btn" id="close-fingerprint-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 2rem 1.5rem;">
+                <div class="biometric-employee-selection" style="margin-bottom: 1.5rem; text-align: right;">
+                    <label for="biometric-employee-select" style="font-weight:700; font-size:0.9rem; margin-bottom:0.5rem; display:block;">
+                        <i class="fa-solid fa-user-check"></i> اختر الموظف للبصم:
+                    </label>
+                    <select id="biometric-employee-select" style="width:100%; padding:0.75rem; border-radius:8px; border:1px solid var(--border-color); font-weight:600; background:var(--bg-card); color:var(--text-main); outline:none;">
+                        <!-- Dynamically filled -->
+                    </select>
+                </div>
+
+                <!-- Biometric Fingerprint Display Circle -->
+                <div class="fingerprint-scanner-circle" id="fingerprint-scanner-zone">
+                    <div class="fingerprint-scan-laser" id="fingerprint-laser"></div>
+                    <i class="fa-solid fa-fingerprint fingerprint-main-icon"></i>
+                    <!-- SVG Circular Progress Bar -->
+                    <svg class="progress-ring" width="160" height="160">
+                        <circle class="progress-ring__circle" stroke="var(--success)" stroke-width="6" fill="transparent" r="74" cx="80" cy="80"/>
+                    </svg>
+                </div>
+
+                <div class="scanner-instruction" id="scanner-instruction-text">
+                    اضغط مع الاستمرار بإصبعك على البصمة لمسح البصمة البيومترية
+                </div>
+                
+                <div class="scanner-sensor-type" id="scanner-sensor-type">
+                    <i class="fa-solid fa-microchip"></i> محاكاة بيومترية نشطة v2.1
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PWA Instructions Modal -->
+    <div class="modal" id="pwa-instruction-modal">
+        <div class="modal-content" style="max-width: 500px; text-align: right;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-download" style="color: var(--primary);"></i> كيفية تثبيت البرنامج (PWA)</h3>
+                <button class="close-modal-btn" onclick="document.getElementById('pwa-instruction-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" style="line-height: 1.6; font-size: 0.9rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 1rem; padding: 1.5rem;">
+                <p>لتثبيت برنامج البصمة كـ تطبيق مستقل على جهاز الكمبيوتر أو الهاتف والعمل بدون إنترنت:</p>
+                
+                <div style="background: rgba(16, 185, 129, 0.08); padding: 1rem; border-radius: 8px; border: 1px solid var(--success-light); margin-bottom: 0.5rem;">
+                    <strong style="color: var(--success); display: block; margin-bottom: 0.5rem;"><i class="fa-solid fa-circle-play"></i> الطريقة الأسهل للكمبيوتر (Windows):</strong>
+                    قم بفتح مجلد البرنامج واضغط مرتين على الملف <strong>[تشغيل_البرنامج.bat]</strong> الذي قمنا بإنشائه لك. سيقوم بتشغيل خادم محلي وفتح زر التثبيت مباشرة!
+                </div>
+                
+                <div style="background: rgba(59, 130, 246, 0.08); padding: 1rem; border-radius: 8px; border: 1px solid var(--primary-light); margin-bottom: 0.5rem;">
+                    <strong style="color: var(--primary); display: block; margin-bottom: 0.5rem;"><i class="fa-solid fa-globe"></i> للهواتف أو الاستضافة السحابية:</strong>
+                    يجب رفع ملفات البرنامج على استضافة ويب آمنة تدعم اتصال (HTTPS). عند فتح الرابط من متصفح الهاتف (مثل Chrome)، ستظهر لك نافذة التثبيت فوراً.
+                </div>
+
+                <div style="background: rgba(0,0,0,0.02); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <strong style="display: block; margin-bottom: 0.5rem;"><i class="fa-solid fa-circle-info"></i> التثبيت اليدوي من المتصفح:</strong>
+                    يمكنك أيضاً تثبيته بالضغط على أيقونة التثبيت <i class="fa-solid fa-desktop"></i> التي تظهر تلقائياً في <strong>شريط عنوان المتصفح (URL Bar)</strong> بالجهة العليا للمتصفح.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="document.getElementById('pwa-instruction-modal').style.display='none'">إغلاق</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar Backdrop for Mobile -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <!-- Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
