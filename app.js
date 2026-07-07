@@ -62,6 +62,8 @@ const pageTitle = document.getElementById("page-title");
 const pageSubtitle = document.getElementById("page-subtitle");
 const globalMonthSelect = document.getElementById("global-month-select");
 const globalEmployeeSelect = document.getElementById("global-employee-select");
+const globalMonthSelectMobile = document.getElementById("global-month-select-mobile");
+const globalEmployeeSelectMobile = document.getElementById("global-employee-select-mobile");
 const themeToggleBtn = document.getElementById("theme-toggle");
 
 // Active Employee Settings Elements
@@ -185,6 +187,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const now = new Date();
     const autoMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     globalMonthSelect.value = autoMonth;
+    if (globalMonthSelectMobile) {
+        globalMonthSelectMobile.value = autoMonth;
+    }
 
     initTheme();
     await initSupabase();
@@ -546,11 +551,18 @@ async function syncAllLocalEmployeesToCloud() {
 
 function populateEmployeeDropdown() {
     globalEmployeeSelect.innerHTML = "";
+    if (globalEmployeeSelectMobile) globalEmployeeSelectMobile.innerHTML = "";
+    
     if (employees.length === 0) {
         const option = document.createElement("option");
         option.value = "";
         option.textContent = "لا يوجد موظفين مضافين";
         globalEmployeeSelect.appendChild(option);
+        
+        if (globalEmployeeSelectMobile) {
+            const mobOption = option.cloneNode(true);
+            globalEmployeeSelectMobile.appendChild(mobOption);
+        }
         return;
     }
     employees.forEach(emp => {
@@ -561,6 +573,11 @@ function populateEmployeeDropdown() {
             option.selected = true;
         }
         globalEmployeeSelect.appendChild(option);
+        
+        if (globalEmployeeSelectMobile) {
+            const mobOption = option.cloneNode(true);
+            globalEmployeeSelectMobile.appendChild(mobOption);
+        }
     });
 }
 
@@ -695,22 +712,49 @@ function setupEventListeners() {
         });
     });
 
-    // Month Selector Change
+    // Month Selector Change (Desktop & Mobile Synced)
     globalMonthSelect.addEventListener("change", (e) => {
-        loadMonthData(e.target.value);
+        const val = e.target.value;
+        if (globalMonthSelectMobile) globalMonthSelectMobile.value = val;
+        loadMonthData(val);
     });
 
-    // Top Employee Selector Switch
-    globalEmployeeSelect.addEventListener("change", (e) => {
-        activeEmployeeId = e.target.value;
+    if (globalMonthSelectMobile) {
+        globalMonthSelectMobile.addEventListener("change", (e) => {
+            const val = e.target.value;
+            globalMonthSelect.value = val;
+            loadMonthData(val);
+        });
+    }
+
+    // Employee Selector Switch Helper
+    const switchActiveEmployee = (empId) => {
+        activeEmployeeId = empId;
         localStorage.setItem("hr_active_employee_id", activeEmployeeId);
+        
+        // Sync dropdown values
+        globalEmployeeSelect.value = activeEmployeeId;
+        if (globalEmployeeSelectMobile) globalEmployeeSelectMobile.value = activeEmployeeId;
         
         const activeEmp = employees.find(emp => emp.id === activeEmployeeId);
         populateActiveEmployeeSettings(activeEmp);
         loadMonthData(globalMonthSelect.value);
         
-        showToast(`تم التغيير إلى ملف الموظف: ${activeEmp.name}`, "success");
+        if (activeEmp) {
+            showToast(`تم التغيير إلى ملف الموظف: ${activeEmp.name}`, "success");
+        }
+    };
+
+    // Top Employee Selector Switch
+    globalEmployeeSelect.addEventListener("change", (e) => {
+        switchActiveEmployee(e.target.value);
     });
+
+    if (globalEmployeeSelectMobile) {
+        globalEmployeeSelectMobile.addEventListener("change", (e) => {
+            switchActiveEmployee(e.target.value);
+        });
+    }
 
     // Search and Filter in Table
     attendanceSearch.addEventListener("input", filterAttendanceTable);

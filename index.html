@@ -65,6 +65,24 @@
                     <i class="fa-solid fa-fingerprint"></i>
                     <span>بصمة الموظف 📲</span>
                 </button>
+
+                <!-- Mobile-only: Employee & Month selectors -->
+                <div class="sidebar-mobile-selectors" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
+                    <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                        <label style="font-size: 0.75rem; font-weight: 700; color: var(--sidebar-text);">
+                            <i class="fa-solid fa-user" style="margin-left: 4px;"></i> الموظف الحالي:
+                        </label>
+                        <select id="global-employee-select-mobile" style="width: 100%; padding: 0.55rem 0.75rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #fff; font-family: var(--font-family); font-size: 0.85rem; outline: none;">
+                            <!-- Synced with main select via JS -->
+                        </select>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                        <label style="font-size: 0.75rem; font-weight: 700; color: var(--sidebar-text);">
+                            <i class="fa-solid fa-calendar" style="margin-left: 4px;"></i> الشهر:
+                        </label>
+                        <input type="month" id="global-month-select-mobile" style="width: 100%; padding: 0.55rem 0.75rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #fff; font-family: var(--font-family); font-size: 0.85rem; outline: none; color-scheme: dark;">
+                    </div>
+                </div>
             </nav>
 
             <div class="sidebar-footer">
