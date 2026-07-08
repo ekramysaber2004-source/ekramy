@@ -541,7 +541,9 @@ async function syncAllLocalEmployeesToCloud() {
             delay_multiplier: emp.delayMultiplier,
             fingerprint_registered: emp.fingerprintRegistered || false
         }));
-        const { error } = await supabaseClient.from('employees').upsert(dbRows);
+        const { error } = await supabaseClient
+            .from('employees')
+            .upsert(dbRows, { onConflict: 'id' });
         if (error) throw error;
         console.log("Local employees pushed to Supabase successfully");
     } catch (err) {
@@ -665,7 +667,9 @@ btnSaveSettings.addEventListener("click", async () => {
                 delay_multiplier: employees[idx].delayMultiplier,
                 fingerprint_registered: employees[idx].fingerprintRegistered || false
             };
-            const { error } = await supabaseClient.from('employees').upsert(dbEmp);
+            const { error } = await supabaseClient
+                .from('employees')
+                .upsert(dbEmp, { onConflict: 'id' });
             if (error) throw error;
             console.log("Active employee synced to Supabase successfully");
         } catch (err) {
@@ -935,7 +939,8 @@ function initBiometricScannerEvents() {
     fingerprintScannerZone.addEventListener("pointerdown", startBiometricScan);
     fingerprintScannerZone.addEventListener("pointerup", cancelBiometricScan);
     fingerprintScannerZone.addEventListener("pointercancel", cancelBiometricScan);
-    fingerprintScannerZone.addEventListener("pointerleave", cancelBiometricScan);
+    // pointerleave removed: on mobile, slight finger movement triggers it and kills the scan.
+    // cancelBiometricScan already handles premature release via pointerup/pointercancel.
 }
 
 function startBiometricScan(e) {
@@ -1039,7 +1044,9 @@ async function completeBiometricScan(emp) {
                     delay_multiplier: emp.delayMultiplier,
                     fingerprint_registered: true
                 };
-                const { error } = await supabaseClient.from('employees').upsert(dbEmp);
+                const { error } = await supabaseClient
+                    .from('employees')
+                    .upsert(dbEmp, { onConflict: 'id' });
                 if (error) throw error;
                 console.log("Registered fingerprint synced to cloud");
             } catch (err) {
@@ -1108,7 +1115,11 @@ async function completeBiometricScan(emp) {
 
     const idx = empAttendance.findIndex(r => r.date === todayStr);
     if (idx === -1) {
-        showToast("خطأ: لم يتم العثور على سجل حضور لليوم الحالي.", "danger");
+        // Today is not in the displayed month — user is viewing a past/future month
+        if (scannerInstructionText) {
+            scannerInstructionText.innerHTML = `<span class="text-danger bold"><i class="fa-solid fa-calendar-xmark"></i> لا يوجد سجل لليوم الحالي!</span><br><span style="font-size:0.8rem;color:var(--text-muted);">تأكد من اختيار الشهر الحالي من القائمة.</span>`;
+        }
+        showToast("اختر الشهر الحالي لتسجيل الحضور والانصراف", "warning");
         resetBiometricScannerState();
         return;
     }
@@ -1862,10 +1873,17 @@ window.deleteEmployee = async function(id) {
         
         // Adjust active employee if deleted
         if (activeEmployeeId === id) {
-            activeEmployeeId = employees[0].id;
-            localStorage.setItem("hr_active_employee_id", activeEmployeeId);
-            const activeEmp = employees.find(e => e.id === activeEmployeeId);
-            populateActiveEmployeeSettings(activeEmp);
+            if (employees.length > 0) {
+                activeEmployeeId = employees[0].id;
+                localStorage.setItem("hr_active_employee_id", activeEmployeeId);
+                const activeEmp = employees.find(e => e.id === activeEmployeeId);
+                populateActiveEmployeeSettings(activeEmp);
+            } else {
+                // No employees left
+                activeEmployeeId = "";
+                localStorage.removeItem("hr_active_employee_id");
+                populateActiveEmployeeSettings(null);
+            }
         }
         
         populateEmployeeDropdown();
@@ -1969,7 +1987,8 @@ async function saveEmployeeRecord() {
             startTime: starttime,
             gracePeriod: grace,
             overtimeMultiplier: overtimeMult,
-            delayMultiplier: delayMult
+            delayMultiplier: delayMult,
+            fingerprintRegistered: false  // Bug fix: was undefined, now explicitly false
         };
         employees.push(newEmp);
         showToast("تم إضافة الموظف الجديد بنجاح", "success");
@@ -1990,9 +2009,12 @@ async function saveEmployeeRecord() {
                 start_time: starttime,
                 grace_period: grace,
                 overtime_multiplier: overtimeMult,
-                delay_multiplier: delayMult
+                delay_multiplier: delayMult,
+                fingerprint_registered: false
             };
-            const { error } = await supabaseClient.from('employees').upsert(dbEmp);
+            const { error } = await supabaseClient
+                .from('employees')
+                .upsert(dbEmp, { onConflict: 'id' });
             if (error) throw error;
             console.log("Employee details synced to Supabase successfully");
         } catch (err) {
@@ -2110,6 +2132,7 @@ function renderHoursChart() {
     }
     
     const activeEmp = employees.find(e => e.id === activeEmployeeId);
+    if (!activeEmp) return;  // Bug fix: guard against missing employee to prevent crash
     const labels = [];
     const workHoursData = [];
     const overtimeData = [];
@@ -2235,8 +2258,10 @@ function exportToExcel() {
     csvContent += "التاريخ,اليوم,الحضور,الانصراف,ساعات العمل,إضافي (دقيقة),تأخير (دقيقة),الحالة\n";
     
     attendanceData.forEach(row => {
-        let checkin = row.checkin ? formatTime12Hour(row.checkin) : "-";
-        let checkout = row.checkout ? formatTime12Hour(row.checkout) : "-";
+        // Use HH:MM only for CSV (cleaner without seconds)
+        const fmtCsvTime = t => t ? formatTime12Hour(t).replace(/:(\d{2}) (AM|PM)/, ' $2') : "-";
+        let checkin = fmtCsvTime(row.checkin);
+        let checkout = fmtCsvTime(row.checkout);
         let workHours = "-";
         let overtime = "0";
         let delay = "0";
