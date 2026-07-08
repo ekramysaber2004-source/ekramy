@@ -1229,7 +1229,9 @@ async function syncAllLocalAttendanceToCloud(monthStr) {
             checkin: row.checkin || null,
             checkout: row.checkout || null
         }));
-        const { error } = await supabaseClient.from('attendance_records').upsert(dbRows);
+        const { error } = await supabaseClient
+            .from('attendance_records')
+            .upsert(dbRows, { onConflict: 'employee_id,date' });
         if (error) throw error;
         console.log(`Local attendance for ${monthStr} pushed to Supabase successfully`);
     } catch (err) {
@@ -1286,13 +1288,16 @@ function saveCurrentMonthData() {
             checkout: row.checkout || null
         }));
         
-        supabaseClient.from('attendance_records').upsert(dbRows).then(({ error }) => {
-            if (error) {
-                console.error("Error syncing attendance updates to Supabase:", error);
-            } else {
-                console.log("Attendance updates pushed to Supabase successfully");
-            }
-        });
+        supabaseClient
+            .from('attendance_records')
+            .upsert(dbRows, { onConflict: 'employee_id,date' })
+            .then(({ error }) => {
+                if (error) {
+                    console.error("Error syncing attendance updates to Supabase:", error);
+                } else {
+                    console.log("Attendance updates pushed to Supabase successfully ✅");
+                }
+            });
     }
 }
 
