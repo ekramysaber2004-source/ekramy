@@ -1171,17 +1171,41 @@ async function loadMonthData(monthStr) {
             if (error) throw error;
             
             if (data && data.length > 0) {
-                attendanceData = data.map(dbRec => ({
-                    date: dbRec.date,
-                    dayName: dbRec.day_name,
-                    status: dbRec.status,
-                    checkin: dbRec.checkin || "",
-                    checkout: dbRec.checkout || ""
-                }));
+                // Build a map of Supabase records by date for fast lookup
+                const supabaseMap = new Map();
+                data.forEach(dbRec => {
+                    supabaseMap.set(dbRec.date, {
+                        date: dbRec.date,
+                        dayName: dbRec.day_name,
+                        status: dbRec.status,
+                        checkin: dbRec.checkin || "",
+                        checkout: dbRec.checkout || ""
+                    });
+                });
+                
+                // SMART MERGE: Never overwrite locally-recorded attendance with empty cloud data.
+                // Score each record: checkin = 2 pts, checkout = 1 pt.
+                // The record with a higher score wins. On equal score, local wins
+                // (it represents the user's most recent action on this device).
+                const mergedData = attendanceData.map(localRec => {
+                    const supRec = supabaseMap.get(localRec.date);
+                    if (!supRec) return localRec; // Supabase has no record for this day → keep local
+                    
+                    const localScore = (localRec.checkin ? 2 : 0) + (localRec.checkout ? 1 : 0);
+                    const supScore = (supRec.checkin ? 2 : 0) + (supRec.checkout ? 1 : 0);
+                    
+                    // Supabase wins only when it has strictly more data (another device recorded)
+                    return supScore > localScore ? supRec : localRec;
+                });
+                
+                attendanceData = mergedData;
                 localStorage.setItem(`attendance_data_${activeEmployeeId}_${currentMonth}`, JSON.stringify(attendanceData));
-                console.log("Month data loaded from Supabase successfully");
+                console.log("Month data merged from Supabase successfully");
+                
+                // Push the merged result back to cloud so it stays in sync
+                await syncAllLocalAttendanceToCloud(currentMonth);
             } else {
-                // If cloud has no records but we generated default local ones, push local to cloud
+                // Cloud is empty → push local data to cloud
                 await syncAllLocalAttendanceToCloud(currentMonth);
             }
         } catch (err) {
