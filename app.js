@@ -307,7 +307,7 @@ function startLiveClock() {
 }
 
 // Quick Stamp: Register Check-in or Check-out at current time for TODAY
-window.quickStamp = function(type) {
+window.quickStamp = async function(type) {
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
@@ -345,7 +345,7 @@ window.quickStamp = function(type) {
         showToast(`🚪 تم تسجيل انصرافك الساعة ${formatTime12Hour(timeNow)}`, 'success');
     }
 
-    saveCurrentMonthData();
+    await saveCurrentMonthData();
     calculateAndPopulate();
 };
 
@@ -452,103 +452,71 @@ themeToggleBtn.addEventListener("click", () => {
 
 // Load Employees List from LocalStorage (with Supabase fallback and sync)
 async function loadEmployees() {
-    // Read from localStorage cache first
-    const savedEmployees = localStorage.getItem("hr_employees");
-    if (savedEmployees) {
-        employees = JSON.parse(savedEmployees);
-        // Clean default fallback if it's the only one
-        if (employees.length === 1 && employees[0].id === "1" && employees[0].name === "عمر الخطيب") {
-            employees = [];
-            localStorage.setItem("hr_employees", JSON.stringify(employees));
-            localStorage.removeItem("hr_active_employee_id");
-            // Clear any attendance data cache for employee 1
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith("attendance_data_1_")) {
-                    localStorage.removeItem(key);
-                    i--;
-                }
-            }
-        }
-    } else {
-        // Start empty by default
+    // ── SUPABASE-ONLY: No localStorage for employee data ──────────────────
+    if (!supabaseClient) {
         employees = [];
-        localStorage.setItem("hr_employees", JSON.stringify(employees));
+        showToast("لا يوجد اتصال بـ Supabase. تحقق من الإعدادات", "danger");
+        populateEmployeeDropdown();
+        populateActiveEmployeeSettings(null);
+        renderEmployeesList();
+        return;
     }
-    
-    // If Supabase is connected, fetch fresh list from cloud
-    if (supabaseClient) {
-        try {
-            const { data, error } = await supabaseClient.from('employees').select('*').order('id');
-            if (error) throw error;
-            
-            if (data && data.length > 0) {
-                // Map db snake_case fields to local camelCase fields
-                employees = data.map(dbEmp => ({
-                    id: dbEmp.id,
-                    name: dbEmp.name,
-                    role: dbEmp.role,
-                    basicSalary: parseFloat(dbEmp.basic_salary),
-                    workDays: parseInt(dbEmp.work_days),
-                    dailyHours: parseInt(dbEmp.daily_hours),
-                    startTime: dbEmp.start_time,
-                    gracePeriod: parseInt(dbEmp.grace_period || 15),
-                    overtimeMultiplier: parseFloat(dbEmp.overtime_multiplier),
-                    delayMultiplier: parseFloat(dbEmp.delay_multiplier),
-                    fingerprintRegistered: dbEmp.fingerprint_registered || false
-                }));
-                localStorage.setItem("hr_employees", JSON.stringify(employees));
-                console.log("Employees synced from Supabase successfully");
-            } else {
-                // Cloud is empty, push local default employees to cloud
-                await syncAllLocalEmployeesToCloud();
-            }
-        } catch (err) {
-            console.warn("Could not sync employees from Supabase, using local cache:", err);
-        }
+
+    try {
+        const { data, error } = await supabaseClient.from('employees').select('*').order('id');
+        if (error) throw error;
+
+        employees = (data || []).map(dbEmp => ({
+            id: dbEmp.id,
+            name: dbEmp.name,
+            role: dbEmp.role,
+            basicSalary: parseFloat(dbEmp.basic_salary),
+            workDays: parseInt(dbEmp.work_days),
+            dailyHours: parseInt(dbEmp.daily_hours),
+            startTime: dbEmp.start_time,
+            gracePeriod: parseInt(dbEmp.grace_period || 15),
+            overtimeMultiplier: parseFloat(dbEmp.overtime_multiplier),
+            delayMultiplier: parseFloat(dbEmp.delay_multiplier),
+            fingerprintRegistered: dbEmp.fingerprint_registered || false
+        }));
+        console.log(`Loaded ${employees.length} employees from Supabase`);
+    } catch (err) {
+        console.error("Failed to load employees from Supabase:", err);
+        showToast("فشل تحميل بيانات الموظفين من Supabase", "danger");
+        employees = [];
     }
-    
-    // Load Active Employee ID
-    activeEmployeeId = localStorage.getItem("hr_active_employee_id") || "1";
-    
-    // Ensure active employee exists, if not fallback to first
+
+    // Active employee ID stored as a preference only (not data)
+    activeEmployeeId = localStorage.getItem("hr_active_employee_id") || "";
+
+    // Ensure active employee exists in the fetched list
     let activeEmp = employees.find(e => e.id === activeEmployeeId);
     if (!activeEmp && employees.length > 0) {
         activeEmployeeId = employees[0].id;
         activeEmp = employees[0];
         localStorage.setItem("hr_active_employee_id", activeEmployeeId);
     }
-    
+
     populateEmployeeDropdown();
     populateActiveEmployeeSettings(activeEmp);
     renderEmployeesList();
 }
 
-// Push all local employees to Supabase
-async function syncAllLocalEmployeesToCloud() {
-    if (!supabaseClient || employees.length === 0) return;
-    try {
-        const dbRows = employees.map(emp => ({
-            id: emp.id,
-            name: emp.name,
-            role: emp.role,
-            basic_salary: emp.basicSalary,
-            work_days: emp.workDays,
-            daily_hours: emp.dailyHours,
-            start_time: emp.startTime,
-            grace_period: emp.gracePeriod,
-            overtime_multiplier: emp.overtimeMultiplier,
-            delay_multiplier: emp.delayMultiplier,
-            fingerprint_registered: emp.fingerprintRegistered || false
-        }));
-        const { error } = await supabaseClient
-            .from('employees')
-            .upsert(dbRows, { onConflict: 'id' });
-        if (error) throw error;
-        console.log("Local employees pushed to Supabase successfully");
-    } catch (err) {
-        console.error("Error pushing employees to cloud:", err);
-    }
+// Helper: map a local employee object to Supabase DB row format
+function empToDbRow(emp) {
+    return {
+        id: emp.id,
+        name: emp.name,
+        role: emp.role,
+        basic_salary: emp.basicSalary,
+        work_days: emp.workDays,
+        daily_hours: emp.dailyHours,
+        start_time: emp.startTime,
+        grace_period: emp.gracePeriod,
+        overtime_multiplier: emp.overtimeMultiplier,
+        delay_multiplier: emp.delayMultiplier,
+        fingerprint_registered: emp.fingerprintRegistered || false
+    };
 }
 
 function populateEmployeeDropdown() {
@@ -620,7 +588,13 @@ function populateActiveEmployeeSettings(emp) {
 btnSaveSettings.addEventListener("click", async () => {
     const idx = employees.findIndex(e => e.id === activeEmployeeId);
     if (idx === -1) return;
-    
+
+    if (!supabaseClient) {
+        showToast("لا يوجد اتصال بـ Supabase. لا يمكن الحفظ", "danger");
+        return;
+    }
+
+    // Update local in-memory object
     employees[idx].name = setEmpName.value;
     employees[idx].role = setEmpRole.value;
     employees[idx].basicSalary = parseFloat(setSalary.value) || 0;
@@ -631,58 +605,37 @@ btnSaveSettings.addEventListener("click", async () => {
     employees[idx].overtimeMultiplier = parseFloat(setOvertimeMult.value) || 1.5;
     employees[idx].delayMultiplier = parseFloat(setDelayMult.value) || 2.0;
 
-    // Save Supabase Settings if entered
+    // Handle Supabase credential changes (stored in localStorage as settings)
     const oldUrl = localStorage.getItem("supabase_url") || "";
     const oldKey = localStorage.getItem("supabase_key") || "";
     const newUrl = setSupabaseUrl.value.trim();
     const newKey = setSupabaseKey.value.trim();
-
     localStorage.setItem("supabase_url", newUrl);
     localStorage.setItem("supabase_key", newKey);
 
-    localStorage.setItem("hr_employees", JSON.stringify(employees));
-    
-    // Refresh Sidebar
-    document.getElementById("display-employee-name").textContent = employees[idx].name;
-    document.getElementById("display-employee-role").textContent = employees[idx].role;
-    
-    // If Supabase credentials changed or are newly set, re-initialize
     if (newUrl !== oldUrl || newKey !== oldKey) {
         await initSupabase();
     }
 
-    // Sync active employee to Supabase cloud if online
-    if (supabaseClient) {
-        try {
-            const dbEmp = {
-                id: employees[idx].id,
-                name: employees[idx].name,
-                role: employees[idx].role,
-                basic_salary: employees[idx].basicSalary,
-                work_days: employees[idx].workDays,
-                daily_hours: employees[idx].dailyHours,
-                start_time: employees[idx].startTime,
-                grace_period: employees[idx].gracePeriod,
-                overtime_multiplier: employees[idx].overtimeMultiplier,
-                delay_multiplier: employees[idx].delayMultiplier,
-                fingerprint_registered: employees[idx].fingerprintRegistered || false
-            };
-            const { error } = await supabaseClient
-                .from('employees')
-                .upsert(dbEmp, { onConflict: 'id' });
-            if (error) throw error;
-            console.log("Active employee synced to Supabase successfully");
-        } catch (err) {
-            console.error("Error syncing active employee to Supabase:", err);
-            showToast("حدث خطأ أثناء المزامنة السحابية للموظف. تم الحفظ محلياً فقط", "warning");
-        }
+    // Save directly to Supabase (only source of truth)
+    try {
+        const { error } = await supabaseClient
+            .from('employees')
+            .upsert(empToDbRow(employees[idx]), { onConflict: 'id' });
+        if (error) throw error;
+
+        // Update sidebar display
+        document.getElementById("display-employee-name").textContent = employees[idx].name;
+        document.getElementById("display-employee-role").textContent = employees[idx].role;
+
+        populateEmployeeDropdown();
+        renderEmployeesList();
+        calculateAndPopulate();
+        showToast("تم تحديث بيانات الموظف بنجاح في Supabase", "success");
+    } catch (err) {
+        console.error("Error saving employee to Supabase:", err);
+        showToast("فشل الحفظ في Supabase: " + err.message, "danger");
     }
-    
-    populateEmployeeDropdown();
-    renderEmployeesList();
-    calculateAndPopulate();
-    
-    showToast("تم تحديث بيانات الموظف وإعادة احتساب سجلاته بنجاح", "success");
 });
 
 // Setup event listeners for tab switching, select box changes, modals, backups
@@ -784,9 +737,10 @@ function setupEventListeners() {
     });
 
     // Reset current month attendance
-    btnResetAttendance.addEventListener("click", () => {
+    btnResetAttendance.addEventListener("click", async () => {
         if (confirm("هل أنت متأكد من إعادة تهيئة الشهر بالكامل؟ سيتم مسح أي تعديلات يدوية لهذا الموظف.")) {
-            generateDefaultMonthData(currentMonth, true);
+            generateDefaultMonthData(currentMonth);
+            await saveCurrentMonthData();
             calculateAndPopulate();
             showToast("تمت إعادة تهيئة الشهر للموظف النشط بنجاح", "success");
         }
@@ -1081,41 +1035,21 @@ async function completeBiometricScan(emp) {
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     
-    // Switch active employee to the scanned employee to refresh dashboard
+    // Switch active employee to the scanned employee
     activeEmployeeId = emp.id;
     localStorage.setItem("hr_active_employee_id", activeEmployeeId);
     populateActiveEmployeeSettings(emp);
     populateEmployeeDropdown();
     renderEmployeesList();
-    
-    // Ensure month data is loaded and synced for this employee
-    const localDataKey = `attendance_data_${activeEmployeeId}_${currentMonth}`;
-    let empAttendance = [];
-    const localData = localStorage.getItem(localDataKey);
-    if (localData) {
-        empAttendance = JSON.parse(localData);
-    } else {
-        // Generate default days
-        const [year, month] = currentMonth.split("-").map(Number);
-        const totalDays = new Date(year, month, 0).getDate();
-        for (let d = 1; d <= totalDays; d++) {
-            const curDate = new Date(year, month - 1, d);
-            const dayIdx = curDate.getDay();
-            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-            let status = dayIdx === 5 || dayIdx === 6 ? "weekend" : "present";
-            empAttendance.push({
-                date: dateStr,
-                dayName: arabicDayNames[dayIdx],
-                status: status,
-                checkin: "",
-                checkout: ""
-            });
-        }
+
+    // If a different employee was selected, we need to load their data from Supabase first
+    if (attendanceData.length === 0 || attendanceData[0]?.employee_id !== emp.id) {
+        await loadMonthData(currentMonth);
     }
 
-    const idx = empAttendance.findIndex(r => r.date === todayStr);
+    // Find today's record in the already-loaded (Supabase) attendance data
+    const idx = attendanceData.findIndex(r => r.date === todayStr);
     if (idx === -1) {
-        // Today is not in the displayed month — user is viewing a past/future month
         if (scannerInstructionText) {
             scannerInstructionText.innerHTML = `<span class="text-danger bold"><i class="fa-solid fa-calendar-xmark"></i> لا يوجد سجل لليوم الحالي!</span><br><span style="font-size:0.8rem;color:var(--text-muted);">تأكد من اختيار الشهر الحالي من القائمة.</span>`;
         }
@@ -1127,27 +1061,26 @@ async function completeBiometricScan(emp) {
     const timeNow = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
     let punchMessage = "";
 
-    if (empAttendance[idx].status === "weekend" || empAttendance[idx].status === "leave") {
-        empAttendance[idx].status = "present";
+    if (attendanceData[idx].status === "weekend" || attendanceData[idx].status === "leave") {
+        attendanceData[idx].status = "present";
     }
 
-    if (!empAttendance[idx].checkin) {
-        empAttendance[idx].checkin = timeNow;
+    if (!attendanceData[idx].checkin) {
+        attendanceData[idx].checkin = timeNow;
         punchMessage = `✅ تم تسجيل حضورك بنجاح الساعة ${formatTime12Hour(timeNow)}`;
         showToast(punchMessage, "success");
-    } else if (empAttendance[idx].checkin && !empAttendance[idx].checkout) {
-        empAttendance[idx].checkout = timeNow;
+    } else if (attendanceData[idx].checkin && !attendanceData[idx].checkout) {
+        attendanceData[idx].checkout = timeNow;
         punchMessage = `🚪 تم تسجيل انصرافك بنجاح الساعة ${formatTime12Hour(timeNow)}`;
         showToast(punchMessage, "success");
     } else {
-        empAttendance[idx].checkout = timeNow;
+        attendanceData[idx].checkout = timeNow;
         punchMessage = `🚪 تم تحديث انصرافك بنجاح الساعة ${formatTime12Hour(timeNow)}`;
         showToast(punchMessage, "success");
     }
 
-    // Save records
-    attendanceData = empAttendance;
-    saveCurrentMonthData();
+    // Save directly to Supabase and refresh UI
+    await saveCurrentMonthData();
     calculateAndPopulate();
 
     // Auto close modal
@@ -1157,158 +1090,105 @@ async function completeBiometricScan(emp) {
 }
 
 
-// Load Month Data for Active Employee
+// Load Month Data for Active Employee — SUPABASE ONLY
 async function loadMonthData(monthStr) {
     currentMonth = monthStr;
-    
-    // Read from localStorage cache first
-    const localData = localStorage.getItem(`attendance_data_${activeEmployeeId}_${currentMonth}`);
-    if (localData) {
-        attendanceData = JSON.parse(localData);
-    } else {
+    attendanceData = [];
+
+    if (!activeEmployeeId) {
+        calculateAndPopulate();
+        return;
+    }
+
+    if (!supabaseClient) {
+        // Offline fallback: generate empty month so UI doesn't break
+        generateDefaultMonthData(currentMonth);
+        calculateAndPopulate();
+        return;
+    }
+
+    try {
+        const { data, error } = await supabaseClient
+            .from('attendance_records')
+            .select('*')
+            .eq('employee_id', activeEmployeeId)
+            .eq('month', currentMonth)
+            .order('date');
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+            // Map Supabase rows directly — no merge needed, Supabase is the truth
+            attendanceData = data.map(dbRec => ({
+                date: dbRec.date,
+                dayName: dbRec.day_name,
+                status: dbRec.status,
+                checkin: dbRec.checkin || "",
+                checkout: dbRec.checkout || ""
+            }));
+            console.log(`Loaded ${attendanceData.length} attendance records from Supabase`);
+        } else {
+            // No records for this month yet → generate defaults and persist to Supabase
+            generateDefaultMonthData(currentMonth);
+            await saveCurrentMonthData();
+            console.log(`Generated and saved default month data for ${monthStr}`);
+        }
+    } catch (err) {
+        console.error("Failed to load attendance from Supabase:", err);
+        showToast("فشل تحميل بيانات الحضور من Supabase", "warning");
         generateDefaultMonthData(currentMonth);
     }
-    
-    // Sync with Supabase if online
-    if (supabaseClient) {
-        try {
-            const { data, error } = await supabaseClient
-                .from('attendance_records')
-                .select('*')
-                .eq('employee_id', activeEmployeeId)
-                .eq('month', currentMonth)
-                .order('date');
-                
-            if (error) throw error;
-            
-            if (data && data.length > 0) {
-                // Build a map of Supabase records by date for fast lookup
-                const supabaseMap = new Map();
-                data.forEach(dbRec => {
-                    supabaseMap.set(dbRec.date, {
-                        date: dbRec.date,
-                        dayName: dbRec.day_name,
-                        status: dbRec.status,
-                        checkin: dbRec.checkin || "",
-                        checkout: dbRec.checkout || ""
-                    });
-                });
-                
-                // SMART MERGE: Never overwrite locally-recorded attendance with empty cloud data.
-                // Score each record: checkin = 2 pts, checkout = 1 pt.
-                // The record with a higher score wins. On equal score, local wins
-                // (it represents the user's most recent action on this device).
-                const mergedData = attendanceData.map(localRec => {
-                    const supRec = supabaseMap.get(localRec.date);
-                    if (!supRec) return localRec; // Supabase has no record for this day → keep local
-                    
-                    const localScore = (localRec.checkin ? 2 : 0) + (localRec.checkout ? 1 : 0);
-                    const supScore = (supRec.checkin ? 2 : 0) + (supRec.checkout ? 1 : 0);
-                    
-                    // Supabase wins only when it has strictly more data (another device recorded)
-                    return supScore > localScore ? supRec : localRec;
-                });
-                
-                attendanceData = mergedData;
-                localStorage.setItem(`attendance_data_${activeEmployeeId}_${currentMonth}`, JSON.stringify(attendanceData));
-                console.log("Month data merged from Supabase successfully");
-                
-                // Push the merged result back to cloud so it stays in sync
-                await syncAllLocalAttendanceToCloud(currentMonth);
-            } else {
-                // Cloud is empty → push local data to cloud
-                await syncAllLocalAttendanceToCloud(currentMonth);
-            }
-        } catch (err) {
-            console.warn("Could not sync month data from Supabase, using cache:", err);
-        }
-    }
-    
+
     calculateAndPopulate();
 }
 
-// Push all local attendance records of current employee/month to Supabase
-async function syncAllLocalAttendanceToCloud(monthStr) {
-    if (!supabaseClient || attendanceData.length === 0) return;
-    try {
-        const dbRows = attendanceData.map(row => ({
-            employee_id: activeEmployeeId,
-            month: monthStr,
-            date: row.date,
-            day_name: row.dayName,
-            status: row.status,
-            checkin: row.checkin || null,
-            checkout: row.checkout || null
-        }));
-        const { error } = await supabaseClient
-            .from('attendance_records')
-            .upsert(dbRows, { onConflict: 'employee_id,date' });
-        if (error) throw error;
-        console.log(`Local attendance for ${monthStr} pushed to Supabase successfully`);
-    } catch (err) {
-        console.error("Error pushing attendance to cloud:", err);
-    }
-}
-
-// Generate default days for active employee
-function generateDefaultMonthData(monthStr, force = false) {
+// Generate default month skeleton (in-memory only, caller must save to Supabase)
+function generateDefaultMonthData(monthStr) {
     const [year, month] = monthStr.split("-").map(Number);
     const generatedData = [];
     const totalDays = new Date(year, month, 0).getDate();
-    
+
     for (let day = 1; day <= totalDays; day++) {
         const currentDayDate = new Date(year, month - 1, day);
-        const dayOfWeekIndex = currentDayDate.getDay(); 
+        const dayOfWeekIndex = currentDayDate.getDay();
         const dayOfWeekArabic = arabicDayNames[dayOfWeekIndex];
         const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        
-        let status = "present";
-        let checkin = "";
-        let checkout = "";
-        
-        // Friday & Saturday weekend
-        if (dayOfWeekIndex === 5 || dayOfWeekIndex === 6) {
-            status = "weekend";
-        }
 
         generatedData.push({
             date: dateString,
             dayName: dayOfWeekArabic,
-            status: status,
-            checkin: checkin,
-            checkout: checkout
+            status: dayOfWeekIndex === 5 || dayOfWeekIndex === 6 ? "weekend" : "present",
+            checkin: "",
+            checkout: ""
         });
     }
-    
+
     attendanceData = generatedData;
-    saveCurrentMonthData();
 }
 
-function saveCurrentMonthData() {
-    localStorage.setItem(`attendance_data_${activeEmployeeId}_${currentMonth}`, JSON.stringify(attendanceData));
-    
-    // Sync with Supabase asynchronously
-    if (supabaseClient) {
-        const dbRows = attendanceData.map(row => ({
-            employee_id: activeEmployeeId,
-            month: currentMonth,
-            date: row.date,
-            day_name: row.dayName,
-            status: row.status,
-            checkin: row.checkin || null,
-            checkout: row.checkout || null
-        }));
-        
-        supabaseClient
+// Save current month attendance to Supabase — the ONLY storage
+async function saveCurrentMonthData() {
+    if (!supabaseClient || !activeEmployeeId || attendanceData.length === 0) return;
+
+    const dbRows = attendanceData.map(row => ({
+        employee_id: activeEmployeeId,
+        month: currentMonth,
+        date: row.date,
+        day_name: row.dayName,
+        status: row.status,
+        checkin: row.checkin || null,
+        checkout: row.checkout || null
+    }));
+
+    try {
+        const { error } = await supabaseClient
             .from('attendance_records')
-            .upsert(dbRows, { onConflict: 'employee_id,date' })
-            .then(({ error }) => {
-                if (error) {
-                    console.error("Error syncing attendance updates to Supabase:", error);
-                } else {
-                    console.log("Attendance updates pushed to Supabase successfully ✅");
-                }
-            });
+            .upsert(dbRows, { onConflict: 'employee_id,date' });
+        if (error) throw error;
+        console.log("Attendance saved to Supabase ✅");
+    } catch (err) {
+        console.error("Error saving attendance to Supabase:", err);
+        showToast("⚠️ فشل الحفظ في Supabase! تحقق من اتصال الإنترنت.", "danger");
     }
 }
 
@@ -1721,7 +1601,7 @@ function hideModal() {
     editModal.style.display = "none";
 }
 
-function saveModalRecord() {
+async function saveModalRecord() {
     const dateStr = modalDateInput.value;
     const index = attendanceData.findIndex(r => r.date === dateStr);
     if (index === -1) return;
@@ -1746,7 +1626,7 @@ function saveModalRecord() {
     attendanceData[index].checkin = newCheckin;
     attendanceData[index].checkout = newCheckout;
     
-    saveCurrentMonthData();
+    await saveCurrentMonthData();
     calculateAndPopulate();
     hideModal();
     showToast(`تم تحديث سجل يوم ${formatDateArabic(dateStr)} بنجاح`, "success");
@@ -1844,52 +1724,48 @@ window.activateEmployee = function(id) {
 window.deleteEmployee = async function(id) {
     const emp = employees.find(e => e.id === id);
     if (!emp) return;
-    
+
+    if (!supabaseClient) {
+        showToast("لا يوجد اتصال بـ Supabase. لا يمكن الحذف", "danger");
+        return;
+    }
+
     if (confirm(`هل أنت متأكد من حذف الموظف "${emp.name}" وكافة سجلات حضوره ورواتبه نهائياً؟ لا يمكن التراجع عن هذا الإجراء.`)) {
-        // Remove employee locally
+        try {
+            // Delete from Supabase (CASCADE will also delete attendance_records if FK is set)
+            const { error } = await supabaseClient.from('employees').delete().eq('id', id);
+            if (error) throw error;
+
+            // Also explicitly delete attendance records for this employee
+            await supabaseClient.from('attendance_records').delete().eq('employee_id', id);
+
+            console.log("Employee and records deleted from Supabase");
+        } catch (err) {
+            console.error("Error deleting employee from Supabase:", err);
+            showToast("فشل الحذف من Supabase: " + err.message, "danger");
+            return;
+        }
+
+        // Update in-memory list
         employees = employees.filter(e => e.id !== id);
-        localStorage.setItem("hr_employees", JSON.stringify(employees));
-        
-        // Clean up local attendance cache
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith(`attendance_data_${id}_`)) {
-                localStorage.removeItem(key);
-                i--; // Adjust index
-            }
-        }
-        
-        // Sync delete with Supabase if online
-        if (supabaseClient) {
-            try {
-                const { error } = await supabaseClient.from('employees').delete().eq('id', id);
-                if (error) throw error;
-                console.log("Employee deleted from Supabase cloud");
-            } catch (err) {
-                console.error("Error deleting employee from Supabase:", err);
-                showToast("حدث خطأ أثناء الحذف السحابي للموظف. تم الحذف محلياً", "warning");
-            }
-        }
-        
-        // Adjust active employee if deleted
+
+        // Adjust active employee
         if (activeEmployeeId === id) {
             if (employees.length > 0) {
                 activeEmployeeId = employees[0].id;
                 localStorage.setItem("hr_active_employee_id", activeEmployeeId);
-                const activeEmp = employees.find(e => e.id === activeEmployeeId);
-                populateActiveEmployeeSettings(activeEmp);
+                populateActiveEmployeeSettings(employees[0]);
             } else {
-                // No employees left
                 activeEmployeeId = "";
                 localStorage.removeItem("hr_active_employee_id");
                 populateActiveEmployeeSettings(null);
             }
         }
-        
+
         populateEmployeeDropdown();
         renderEmployeesList();
         await loadMonthData(globalMonthSelect.value);
-        showToast("تم حذف الموظف وسجلاته بالكامل بنجاح", "success");
+        showToast("تم حذف الموظف وسجلاته بالكامل من Supabase بنجاح", "success");
     }
 };
 
@@ -1937,12 +1813,17 @@ async function saveEmployeeRecord() {
     const id = empModalId.value;
     const name = empModalName.value.trim();
     const role = empModalRole.value.trim();
-    
+
     if (!name || !role) {
         showToast("يرجى ملء الاسم والمسمى الوظيفي للموظف", "warning");
         return;
     }
-    
+
+    if (!supabaseClient) {
+        showToast("لا يوجد اتصال بـ Supabase. لا يمكن الحفظ", "danger");
+        return;
+    }
+
     const salary = parseFloat(empModalSalary.value) || 0;
     const workdays = parseInt(empModalWorkdays.value) || 22;
     const dailyhours = parseInt(empModalDailyhours.value) || 8;
@@ -1950,142 +1831,154 @@ async function saveEmployeeRecord() {
     const grace = parseInt(empModalGrace.value) || 15;
     const overtimeMult = parseFloat(empModalOvertimeMult.value) || 1.5;
     const delayMult = parseFloat(empModalDelayMult.value) || 2.0;
-    
+
+    // Determine ID: existing or new
     let targetId = id;
-    
-    if (id) {
-        // Update existing employee
-        const idx = employees.findIndex(e => e.id === id);
-        if (idx !== -1) {
-            employees[idx].name = name;
-            employees[idx].role = role;
-            employees[idx].basicSalary = salary;
-            employees[idx].workDays = workdays;
-            employees[idx].dailyHours = dailyhours;
-            employees[idx].startTime = starttime;
-            employees[idx].gracePeriod = grace;
-            employees[idx].overtimeMultiplier = overtimeMult;
-            employees[idx].delayMultiplier = delayMult;
-            
-            // If active employee is being edited, update active settings
-            if (id === activeEmployeeId) {
-                populateActiveEmployeeSettings(employees[idx]);
+    let isNew = false;
+    if (!id) {
+        isNew = true;
+        // Generate next ID based on current max in Supabase-loaded list
+        targetId = employees.length > 0
+            ? (Math.max(...employees.map(e => parseInt(e.id))) + 1).toString()
+            : "1";
+    }
+
+    const dbEmp = {
+        id: targetId,
+        name: name,
+        role: role,
+        basic_salary: salary,
+        work_days: workdays,
+        daily_hours: dailyhours,
+        start_time: starttime,
+        grace_period: grace,
+        overtime_multiplier: overtimeMult,
+        delay_multiplier: delayMult,
+        fingerprint_registered: isNew ? false : (employees.find(e => e.id === id)?.fingerprintRegistered || false)
+    };
+
+    try {
+        // Save directly to Supabase
+        const { error } = await supabaseClient
+            .from('employees')
+            .upsert(dbEmp, { onConflict: 'id' });
+        if (error) throw error;
+        console.log(`Employee ${isNew ? 'added' : 'updated'} in Supabase successfully`);
+
+        // Reload fresh employee list from Supabase
+        await loadEmployees();
+
+        // If new employee, activate them automatically
+        if (isNew) {
+            const newEmp = employees.find(e => e.id === targetId);
+            if (newEmp) {
+                activeEmployeeId = targetId;
+                localStorage.setItem("hr_active_employee_id", activeEmployeeId);
+                populateActiveEmployeeSettings(newEmp);
+                populateEmployeeDropdown();
+                await loadMonthData(globalMonthSelect.value);
             }
-            showToast("تم تحديث بيانات الموظف بنجاح", "success");
+        } else {
+            // Refresh active employee settings if it was the one edited
+            if (id === activeEmployeeId) {
+                const updatedEmp = employees.find(e => e.id === id);
+                if (updatedEmp) populateActiveEmployeeSettings(updatedEmp);
+            }
         }
-    } else {
-        // Create new employee
-        const newId = employees.length > 0 ? (Math.max(...employees.map(e => parseInt(e.id))) + 1).toString() : "1";
-        targetId = newId;
-        const newEmp = {
-            id: newId,
-            name: name,
-            role: role,
-            basicSalary: salary,
-            workDays: workdays,
-            dailyHours: dailyhours,
-            startTime: starttime,
-            gracePeriod: grace,
-            overtimeMultiplier: overtimeMult,
-            delayMultiplier: delayMult,
-            fingerprintRegistered: false  // Bug fix: was undefined, now explicitly false
-        };
-        employees.push(newEmp);
-        showToast("تم إضافة الموظف الجديد بنجاح", "success");
+
+        hideEmployeeModal();
+        calculateAndPopulate();
+        showToast(isNew ? "تم إضافة الموظف في Supabase بنجاح" : "تم تحديث بيانات الموظف في Supabase بنجاح", "success");
+    } catch (err) {
+        console.error("Error saving employee to Supabase:", err);
+        showToast("فشل الحفظ في Supabase: " + err.message, "danger");
     }
-    
-    localStorage.setItem("hr_employees", JSON.stringify(employees));
-    
-    // Sync with Supabase if online
-    if (supabaseClient) {
-        try {
-            const dbEmp = {
-                id: targetId,
-                name: name,
-                role: role,
-                basic_salary: salary,
-                work_days: workdays,
-                daily_hours: dailyhours,
-                start_time: starttime,
-                grace_period: grace,
-                overtime_multiplier: overtimeMult,
-                delay_multiplier: delayMult,
-                fingerprint_registered: false
-            };
-            const { error } = await supabaseClient
-                .from('employees')
-                .upsert(dbEmp, { onConflict: 'id' });
-            if (error) throw error;
-            console.log("Employee details synced to Supabase successfully");
-        } catch (err) {
-            console.error("Error syncing employee details to Supabase:", err);
-            showToast("فشلت المزامنة السحابية للموظف. تم الحفظ محلياً", "warning");
-        }
-    }
-    
-    populateEmployeeDropdown();
-    renderEmployeesList();
-    hideEmployeeModal();
-    calculateAndPopulate();
 }
 
-// Backup & Restore Database
-function exportFullBackup() {
-    const backupObj = {
-        hr_employees: employees,
-        hr_active_employee_id: activeEmployeeId,
-        theme: localStorage.getItem("theme") || "light"
-    };
-    
-    // Pull all monthly attendance records
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith("attendance_data_")) {
-            backupObj[key] = JSON.parse(localStorage.getItem(key));
-        }
+// Backup & Restore Database — Supabase as source
+async function exportFullBackup() {
+    if (!supabaseClient) {
+        showToast("لا يوجد اتصال بـ Supabase لتصدير البيانات", "danger");
+        return;
     }
-    
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupObj, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    
-    const today = new Date();
-    const dateFormatted = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    
-    downloadAnchor.setAttribute("download", `نسخة_احتياطية_نظام_بصمة_${dateFormatted}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-    showToast("تم تصدير نسخة احتياطية من قاعدة البيانات بنجاح", "success");
+
+    showToast("جاري تجميع البيانات من Supabase...", "success");
+
+    try {
+        // Fetch all employees
+        const { data: empData, error: empErr } = await supabaseClient.from('employees').select('*');
+        if (empErr) throw empErr;
+
+        // Fetch all attendance records
+        const { data: attData, error: attErr } = await supabaseClient.from('attendance_records').select('*');
+        if (attErr) throw attErr;
+
+        const backupObj = {
+            version: 2,
+            exported_at: new Date().toISOString(),
+            hr_employees: empData || [],
+            attendance_records: attData || [],
+            theme: localStorage.getItem("theme") || "light"
+        };
+
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupObj, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        const today = new Date();
+        const dateFormatted = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        downloadAnchor.setAttribute("download", `نسخة_احتياطية_نظام_بصمة_${dateFormatted}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        showToast("تم تصدير نسخة احتياطية كاملة من Supabase بنجاح", "success");
+    } catch (err) {
+        console.error("Backup export failed:", err);
+        showToast("فشل تصدير النسخة الاحتياطية: " + err.message, "danger");
+    }
 }
 
 function importFullBackup(event) {
     const file = event.target.files[0];
     if (!file) return;
-    
+
+    if (!supabaseClient) {
+        showToast("لا يوجد اتصال بـ Supabase لاستيراد البيانات", "danger");
+        return;
+    }
+
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
             const importedData = JSON.parse(e.target.result);
-            if (!importedData.hr_employees || !importedData.hr_active_employee_id) {
+            if (!importedData.hr_employees) {
                 showToast("ملف النسخة الاحتياطية غير صالح أو تالف", "danger");
                 return;
             }
-            
-            if (confirm("تحذير: استيراد النسخة الاحتياطية سيقوم باستبدال كافة البيانات الحالية للموظفين وسجلات الحضور. هل تريد الاستمرار؟")) {
-                // Clear all old system keys first
-                localStorage.clear();
-                
-                // Write imported keys
-                Object.keys(importedData).forEach(key => {
-                    if (typeof importedData[key] === "object") {
-                        localStorage.setItem(key, JSON.stringify(importedData[key]));
-                    } else {
-                        localStorage.setItem(key, importedData[key]);
-                    }
-                });
-                
-                showToast("تم استيراد قاعدة البيانات بنجاح، جاري إعادة تحميل التطبيق...", "success");
+
+            if (confirm("تحذير: استيراد النسخة الاحتياطية سيستبدل كافة البيانات في Supabase. هل تريد الاستمرار؟")) {
+                showToast("جاري رفع البيانات إلى Supabase...", "success");
+
+                // Push employees to Supabase
+                if (importedData.hr_employees.length > 0) {
+                    const { error: empErr } = await supabaseClient
+                        .from('employees')
+                        .upsert(importedData.hr_employees, { onConflict: 'id' });
+                    if (empErr) throw empErr;
+                }
+
+                // Push attendance records to Supabase
+                if (importedData.attendance_records && importedData.attendance_records.length > 0) {
+                    const { error: attErr } = await supabaseClient
+                        .from('attendance_records')
+                        .upsert(importedData.attendance_records, { onConflict: 'employee_id,date' });
+                    if (attErr) throw attErr;
+                }
+
+                if (importedData.theme) {
+                    localStorage.setItem("theme", importedData.theme);
+                }
+
+                showToast("تم استيراد البيانات إلى Supabase بنجاح، جاري إعادة التحميل...", "success");
                 setTimeout(() => location.reload(), 1500);
             }
         } catch (err) {
